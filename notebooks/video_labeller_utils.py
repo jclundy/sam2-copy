@@ -7,6 +7,44 @@ from matplotlib.patches import Rectangle
 from PIL import Image
 from sam2.build_sam import build_sam2_video_predictor
 
+def get_frame_name_list(video_dir):
+    # scan all the JPEG frame names in this directory
+    frame_names = [
+        p for p in os.listdir(video_dir)
+        if os.path.splitext(p)[-1] in [".jpg", ".jpeg", ".JPG", ".JPEG"]
+    ]
+    frame_names.sort(key=lambda p: int(os.path.splitext(p)[0]))
+    return frame_names
+
+def initialize_labels(id_list, positions, predictor, inference_state, frame_idx, prompts):
+    for idx in range(0, len(id_list)):
+        ann_obj_id = id_list[idx]
+        points = np.array(positions[idx], dtype=np.float32)
+        # for labels, `1` means positive click and `0` means negative click
+        numClicks = points.shape[0]           
+        labels = np.ones(numClicks)
+        prompts[ann_obj_id] = points, labels
+        _, out_obj_ids, out_mask_logits = predictor.add_new_points_or_box(
+            inference_state=inference_state,
+            frame_idx=frame_idx,
+            obj_id=ann_obj_id,
+            points=points,
+            labels=labels,
+        )
+    return out_obj_ids, out_mask_logits
+
+def add_label(obj_id, positions, labels, predictor, inference_state, frame_idx, prompts):
+    #labels = np.ones(numClicks)
+    points = np.array(positions, dtype=np.float32)
+    prompts[obj_id] = points, labels
+    _, out_obj_ids, out_mask_logits = predictor.add_new_points_or_box(
+    inference_state=inference_state,
+    frame_idx=frame_idx,
+    obj_id=obj_id,
+    points=points,
+    labels=labels,
+    )
+
 def propagate_in_video(predictor, inference_state):
     video_segments = {}  # video_segments contains the per-frame segmentation results
     for out_frame_idx, out_obj_ids, out_mask_logits in predictor.propagate_in_video(inference_state):
@@ -50,11 +88,28 @@ def show_box(box, ax):
     w, h = box[2] - box[0], box[3] - box[1]
     ax.add_patch(plt.Rectangle((x0, y0), w, h, edgecolor='green', facecolor=(0, 0, 0, 0), lw=2))
 
-def get_bounding_box_from_mask(mask):
+def get_outlier_indices(values, threshold):
+    std = np.std(values)
+    mean = np.mean(values)
+    deviations = np.abs(values - mean)/std
+
+    outliers = np.argwhere(deviations > threshold)
+    return outliers
+
+def get_bounding_box_from_mask(mask, x_dev_threshold=10, y_dev_threshold=10):
     coords = np.argwhere(mask == True)
     if(coords.size == 0):
         return [(0, 0), (0, 0)] 
     
+    # remove outliers
+    y_outliers = get_outlier_indices(coords[:,1], y_dev_threshold)
+    x_outliers = get_outlier_indices(coords[:,0], x_dev_threshold)
+
+    if(len(y_outliers) >= 1):
+        coords = np.delete(coords, y_outliers, axis=0)
+    if(len(x_outliers) >= 1):
+        coords = np.delete(coords, x_outliers, axis=0)
+
     xmin = np.min(coords[:,2])
     xmax = np.max(coords[:,2])
 
