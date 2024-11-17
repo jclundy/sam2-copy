@@ -16,6 +16,22 @@ def get_frame_name_list(video_dir):
     frame_names.sort(key=lambda p: int(os.path.splitext(p)[0]))
     return frame_names
 
+def add_label(obj_id, positions, predictor, inference_state, frame_idx, prompts, positive=True):
+    #labels = np.ones(numClicks)      
+    points = np.array(positions, dtype=np.float32)
+    labels = np.ones(points.shape[0])
+    if(positive == False):
+        labels = np.zeros(points.shape[0])
+    prompts[obj_id] = points, labels
+    _, out_obj_ids, out_mask_logits = predictor.add_new_points_or_box(
+    inference_state=inference_state,
+    frame_idx=frame_idx,
+    obj_id=obj_id,
+    points=points,
+    labels=labels,
+    )
+    return out_obj_ids, out_mask_logits
+
 def initialize_labels(id_list, positions, predictor, inference_state, frame_idx, prompts):
     for idx in range(0, len(id_list)):
         ann_obj_id = id_list[idx]
